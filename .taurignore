@@ -1,0 +1,4 @@
+data/
+node_modules/.vite
+*.db-shm
+*.db-wal

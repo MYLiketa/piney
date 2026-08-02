@@ -1,0 +1,234 @@
+//! API 模块入口
+//!
+//! 定义所有 RESTful API 路由
+
+pub mod ai;
+pub mod backup;
+pub mod cards;
+pub mod categories;
+pub mod dashboard;
+pub mod frontend_style;
+pub mod history;
+pub mod image_categories;
+pub mod images;
+pub mod presets;
+pub mod quick_reply;
+pub mod settings;
+pub mod system;
+pub mod theater;
+pub mod upload;
+pub mod versions;
+pub mod world_info;
+
+use axum::{
+    extract::DefaultBodyLimit,
+    routing::{delete, get, patch, post, put},
+    Router,
+};
+use sea_orm::DatabaseConnection;
+
+use crate::config::ConfigState;
+use backup::BackupState;
+
+pub fn routes(db: DatabaseConnection, config: ConfigState) -> Router {
+    use tower_http::compression::CompressionLayer;
+
+    // 备份恢复需要的组合状态
+    let backup_state = BackupState {
+        db: db.clone(),
+        config: config.clone(),
+    };
+
+    // 1. 需要压缩的路由（大部分 JSON API）
+    let compressed_routes = Router::new()
+        // 设置
+        .route("/settings", patch(settings::update))
+        .route("/system/restart", post(system::restart))
+        // 仪表盘
+        .route("/dashboard", get(dashboard::get_dashboard_stats))
+        .route("/gacha/draw", post(dashboard::start_gacha))
+        .route("/gacha/reveal", post(dashboard::reveal_gacha))
+        .route("/gacha/confirm", post(dashboard::confirm_gacha))
+        // 上传
+        .route("/upload", post(upload::upload_image))
+        // 角色卡
+        .route("/cards/all", get(cards::list_all))
+        .route("/cards/stats/tags", get(cards::tag_stats))
+        .route("/cards", get(cards::list))
+        .route("/cards/import", post(cards::import))
+        .route("/cards/debug_import", post(cards::debug_import))
+        .route("/cards/create", post(cards::create_card))
+        .route(
+            "/cards/{id}",
+            get(cards::get_details)
+                .patch(cards::update)
+                .delete(cards::soft_delete),
+        )
+        .route("/cards/{id}/cover", post(cards::update_cover))
+        .route("/cards/{id}/export", get(cards::export_card))
+        .route("/cards/batch/category", put(cards::batch_update_category))
+        .route("/cards/batch/delete", post(cards::batch_soft_delete))
+        .route("/cards/batch/export", post(cards::batch_export_cards))
+        // 角色卡版本管理
+        .route(
+            "/cards/{id}/versions",
+            get(versions::list_versions).post(versions::create_version),
+        )
+        .route(
+            "/cards/{id}/versions/{version_id}/restore",
+            post(versions::restore_version),
+        )
+        .route(
+            "/cards/{id}/versions/{version_id}",
+            delete(versions::delete_version),
+        )
+        // 聊天记录
+        .route(
+            "/cards/{id}/history",
+            get(history::list_history).post(history::upload_history),
+        )
+        .route(
+            "/cards/{id}/history/{history_id}",
+            patch(history::update_history).delete(history::delete_history),
+        )
+        .route(
+            "/cards/{id}/history/{history_id}/content",
+            get(history::get_history_content).put(history::update_history_content),
+        )
+        // 快速回复
+        .route(
+            "/cards/{id}/quick_reply",
+            get(quick_reply::list_quick_replies).post(quick_reply::upload_quick_reply),
+        )
+        .route(
+            "/cards/{id}/quick_reply/{qr_id}",
+            patch(quick_reply::update_quick_reply).delete(quick_reply::delete_quick_reply),
+        )
+        .route(
+            "/cards/{id}/quick_reply/{qr_id}/export",
+            get(quick_reply::export_quick_reply),
+        )
+        // 回收站
+        .route("/trash/cards", get(cards::list_trash))
+        .route("/trash/cards/{id}/restore", post(cards::restore_card))
+        .route("/trash/cards/{id}", delete(cards::permanent_delete))
+        .route("/trash/cards/batch-delete", post(cards::batch_delete_trash))
+        .route("/trash/cards/clear", delete(cards::clear_trash))
+        // 分类
+        .route("/categories", get(categories::list))
+        .route("/categories", post(categories::create))
+        .route("/categories/reorder", put(categories::reorder))
+        .route(
+            "/categories/{id}",
+            patch(categories::update).delete(categories::delete),
+        )
+        // 图库分类
+        .route(
+            "/image-categories",
+            get(image_categories::list).post(image_categories::create),
+        )
+        .route("/image-categories/reorder", put(image_categories::reorder))
+        .route(
+            "/image-categories/{id}",
+            patch(image_categories::update).delete(image_categories::delete),
+        )
+        // 图库
+        .route("/images", get(images::list).post(images::import))
+        .route("/images/batch/delete", post(images::batch_delete))
+        .route("/images/batch/category", put(images::batch_category))
+        .route("/images/batch/update", patch(images::batch_update))
+        .route("/images/batch/export", post(images::batch_export))
+        .route(
+            "/images/{id}",
+            get(images::get)
+                .patch(images::update)
+                .delete(images::delete),
+        )
+        .route("/images/{id}/export", get(images::export))
+        // 世界书
+        .route("/world_info/import", post(world_info::import))
+        .route("/world_info", get(world_info::list))
+        .route(
+            "/world_info/{id}",
+            get(world_info::get_details)
+                .patch(world_info::update)
+                .delete(world_info::delete),
+        )
+        // 预设
+        .route("/presets/import", post(presets::import))
+        .route("/presets", get(presets::list))
+        .route(
+            "/presets/{id}",
+            get(presets::get_details)
+                .patch(presets::update)
+                .delete(presets::delete),
+        )
+        .route("/presets/{id}/export", get(presets::export))
+        .route("/presets/{id}/export-regex", get(presets::export_regex))
+        // AI
+        .route(
+            "/ai/channels",
+            get(ai::list_channels).post(ai::create_channel),
+        )
+        .route("/ai/channels/test", post(ai::test_saved_channels)) // Batch test
+        .route(
+            "/ai/channels/{id}",
+            delete(ai::delete_channel).put(ai::update_channel),
+        )
+        .route("/ai/test", post(ai::test_connection))
+        .route("/ai/models", get(ai::list_models_proxy))
+        .route("/ai/card/overview", post(ai::generate_overview))
+        .route("/ai/execute", post(ai::execute_feature))
+        // 小皮医生
+        .route("/ai/doctor/analyze", post(ai::doctor_analyze))
+        .route("/ai/doctor/history/{card_id}", get(ai::doctor_history))
+        .route(
+            "/ai/doctor/history/item/{id}",
+            delete(ai::doctor_history_delete),
+        )
+        // 小剧场
+        .route(
+            "/theaters",
+            get(theater::list_theaters).post(theater::create_theater),
+        )
+        .route("/theaters/import", post(theater::import_theaters))
+        .route("/theaters/categories", get(theater::list_categories))
+        .route("/theaters/batch", delete(theater::batch_delete_theaters))
+        .route(
+            "/theaters/{id}",
+            get(theater::get_theater)
+                .patch(theater::update_theater)
+                .delete(theater::delete_theater),
+        )
+        // 前端样式
+        .route(
+            "/frontend-styles",
+            get(frontend_style::list_styles).post(frontend_style::create_style),
+        )
+        .route(
+            "/frontend-styles/{id}",
+            get(frontend_style::get_style)
+                .put(frontend_style::update_style)
+                .delete(frontend_style::delete_style),
+        )
+        // 核心：应用压缩层
+        .layer(CompressionLayer::new());
+
+    // 2. 不需要压缩的路由 (流式传输)
+    let streaming_routes = Router::new()
+        .route("/backup/export", get(backup::export_backup))
+        .route("/theaters/export", get(theater::export_theaters));
+
+    // 3. 备份导入路由 (使用 BackupState，包含 config)
+    // 禁用默认 body 大小限制，允许上传任意大小的备份文件
+    let backup_import_route = Router::new()
+        .route("/backup/import", post(backup::import_backup))
+        .layer(DefaultBodyLimit::disable())
+        .with_state(backup_state);
+
+    // 4. 合并路由
+    compressed_routes
+        .merge(streaming_routes)
+        .with_state(db)
+        .merge(backup_import_route)
+}

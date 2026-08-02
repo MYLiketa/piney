@@ -1,0 +1,19 @@
+{
+    "name": "piney",
+    "version": "0.3.0",
+    "private": true,
+    "scripts": {
+        "dev": "cd frontend && npm run dev",
+        "dev:backend": "cargo run",
+        "build": "cd frontend && npm run build",
+        "check": "cd frontend && npm run check",
+        "tauri": "./frontend/node_modules/.bin/tauri",
+        "docker:build": "cd docker && docker-compose build",
+        "docker:up": "cd docker && docker-compose up -d"
+    },
+    "description": "Piney - SillyTavern 角色卡工作站",
+    "dependencies": {
+        "@tauri-apps/plugin-dialog": "2.6.0",
+        "@tauri-apps/plugin-fs": "2.4.5"
+    }
+}

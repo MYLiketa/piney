@@ -1,0 +1,235 @@
+<script lang="ts">
+    import { Button } from "$lib/components/ui/button";
+    import { Badge } from "$lib/components/ui/badge";
+    import { Label } from "$lib/components/ui/label";
+    import {
+        ChevronLeft,
+        ChevronRight,
+        Plus,
+        Trash2,
+        Maximize2,
+        MessageSquare,
+        Palette
+    } from "lucide-svelte";
+    import RichTextarea from "./RichTextarea.svelte";
+    import { toast } from "svelte-sonner";
+    import { cn } from "$lib/utils";
+    import { renderContent } from "$lib/utils/textRenderer";
+    import HTMLRender from "$lib/components/render/HTMLRender.svelte";
+    import * as Dialog from "$lib/components/ui/dialog";
+    import { AiFeature } from "$lib/ai/types";
+
+    let {
+        firstMes = $bindable(),
+        alternateGreetings = $bindable([]),
+        isDirty = false,
+        regexScripts = [],
+        extraActions = undefined as import('svelte').Snippet | undefined,
+        class: className = undefined,
+    } = $props();
+
+    let currentIndex = $state(0);
+    let totalCount = $derived(1 + (alternateGreetings?.length || 0));
+
+    function next() {
+        if (currentIndex < totalCount - 1) {
+            currentIndex++;
+        }
+    }
+
+    function prev() {
+        if (currentIndex > 0) {
+            currentIndex--;
+        }
+    }
+
+    function addGreeting() {
+        // Ensure alternateGreetings is initialized
+        if (!alternateGreetings) alternateGreetings = [];
+        alternateGreetings = [...alternateGreetings, ""];
+        currentIndex = totalCount - 1; // Jump to new one
+        toast.success("已添加新开场白");
+    }
+
+    function removeCurrent() {
+        if (currentIndex === 0) {
+            // Deleting main greeting
+            if (alternateGreetings && alternateGreetings.length > 0) {
+                // Determine which alternate becomes the new main
+                // Strategy: The first alternate becomes the new First Message
+                const newFirst = alternateGreetings[0];
+                alternateGreetings.splice(0, 1);
+                alternateGreetings = [...alternateGreetings];
+                firstMes = newFirst;
+                toast.success("已删除主开场白，备选开场白已晋升");
+            } else {
+                // No alternates, just clear it
+                firstMes = "";
+                toast.success("已清空主开场白");
+            }
+        } else {
+            // Deleting alternate
+            const altIndex = currentIndex - 1;
+            alternateGreetings.splice(altIndex, 1);
+            alternateGreetings = [...alternateGreetings]; // Trigger update
+            currentIndex = Math.max(0, currentIndex - 1);
+            toast.success("已删除开场白");
+        }
+    }
+
+    let isZenMode = $state(false);
+    let isPreviewOpen = $state(false);
+    let previewContent = $state("");
+
+    function togglePreview() {
+        if (!regexScripts) {
+             // Optional: warn user but still render without scripts
+             // toast.error("未找到正则脚本配置"); 
+             previewContent = renderContent(currentIndex === 0 ? firstMes : alternateGreetings[currentIndex - 1], []);
+        } else {
+             previewContent = renderContent(currentIndex === 0 ? firstMes : alternateGreetings[currentIndex - 1], regexScripts);
+        }
+        isPreviewOpen = true;
+    }
+</script>
+
+<div
+    class={cn(
+        "space-y-4 border rounded-xl p-3 md:p-4 bg-muted/20 relative transition-colors duration-300",
+        className,
+        isDirty && "border border-amber-500/50 bg-amber-500/5",
+    )}
+>
+    {#if isDirty}
+        <span
+            class="absolute -right-1 -top-1 w-2 h-2 rounded-full bg-amber-500 z-10 shadow-sm"
+            title="未保存的更改"
+        ></span>
+    {/if}
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+        <!-- 标题区域 -->
+        <div class="flex items-center gap-2">
+            <MessageSquare class="h-4 w-4 text-muted-foreground" />
+            <Label class="text-sm">
+                {#if currentIndex === 0}
+                    开场白 (主)
+                {:else}
+                    开场白 (备选 {currentIndex})
+                {/if}
+            </Label>
+            <Badge variant="outline" class="text-[10px] h-5 px-1.5">
+                {currentIndex + 1} / {totalCount}
+            </Badge>
+        </div>
+
+        <!-- 工具栏区域 -->
+        <div class="flex items-center gap-0.5 sm:gap-1 flex-wrap justify-end">
+            <!-- 翻页按钮 -->
+            <Button
+                variant="ghost"
+                size="icon"
+                class="h-7 w-7"
+                disabled={currentIndex === 0}
+                onclick={prev}
+                title="上一个"
+            >
+                <ChevronLeft class="h-4 w-4" />
+            </Button>
+
+            <Button
+                variant="ghost"
+                size="icon"
+                class="h-7 w-7"
+                disabled={currentIndex === totalCount - 1}
+                onclick={next}
+                title="下一个"
+            >
+                <ChevronRight class="h-4 w-4" />
+            </Button>
+
+            <div class="w-px h-4 bg-border mx-0.5 sm:mx-1 hidden sm:block"></div>
+
+            <!-- 操作按钮 -->
+             <Button
+                variant="ghost"
+                size="icon"
+                class="h-7 w-7 text-muted-foreground hover:text-foreground"
+                onclick={togglePreview}
+                title="预览渲染效果"
+            >
+                <Palette class="h-4 w-4" />
+            </Button>
+
+            {#if extraActions}
+                {@render extraActions()}
+            {/if}
+
+            <Button
+                variant="ghost"
+                size="icon"
+                class="h-7 w-7 text-muted-foreground hover:text-foreground"
+                onclick={addGreeting}
+                title="添加开场白"
+            >
+                <Plus class="h-4 w-4" />
+            </Button>
+
+            <Button
+                variant="ghost"
+                size="icon"
+                class="h-7 w-7 text-muted-foreground hover:text-destructive"
+                onclick={removeCurrent}
+                title="删除当前"
+            >
+                <Trash2 class="h-4 w-4" />
+            </Button>
+
+            <div class="w-px h-4 bg-border mx-0.5 sm:mx-1"></div>
+
+            <!-- 全屏按钮：移动端只显示图标 -->
+            <Button
+                variant="ghost"
+                size="icon"
+                class="h-7 w-7 text-muted-foreground hover:text-primary"
+                onclick={() => (isZenMode = true)}
+                title="全屏编辑"
+            >
+                <Maximize2 class="h-4 w-4" />
+            </Button>
+        </div>
+    </div>
+
+    {#if currentIndex === 0}
+        <RichTextarea
+            bind:value={firstMes}
+            placeholder="输入主开场白..."
+            rows={5}
+            class="animate-in fade-in slide-in-from-right-2 duration-300"
+            bind:isZenMode
+            aiFeature={AiFeature.OPTIMIZE_FIRST_MES}
+        />
+    {:else if alternateGreetings && alternateGreetings[currentIndex - 1] !== undefined}
+        <RichTextarea
+            bind:value={alternateGreetings[currentIndex - 1]}
+            placeholder="输入备选开场白..."
+            rows={5}
+            class="animate-in fade-in slide-in-from-right-2 duration-300"
+            bind:isZenMode
+            aiFeature={AiFeature.OPTIMIZE_FIRST_MES}
+        />
+    {/if}
+</div>
+
+<Dialog.Root bind:open={isPreviewOpen}>
+    <Dialog.Content class="!max-w-none !w-[90vw] md:!w-[60vw] lg:!w-[45vw] h-[80vh] flex flex-col p-0 gap-0">
+        <Dialog.Header class="px-6 py-4 border-b">
+            <Dialog.Title>开场白预览</Dialog.Title>
+        </Dialog.Header>
+        <div class="flex-1 overflow-y-auto p-6 bg-muted/10">
+             <HTMLRender content={previewContent} />
+        </div>
+        <Dialog.Footer class="px-6 py-4 border-t bg-muted/20">
+            <Button variant="outline" onclick={() => isPreviewOpen = false}>关闭</Button>
+        </Dialog.Footer>
+    </Dialog.Content>
+</Dialog.Root>
